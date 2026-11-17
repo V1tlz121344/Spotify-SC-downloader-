@@ -27,14 +27,17 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 APP_NAME = "music_dl"
 FORMATS = ("mp3", "m4a", "flac", "opus")
+DOWNLOAD_WORKERS = 5
 SC_TEMPLATE = "%(artist,uploader)s - %(title)s.%(ext)s"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/141.0 Safari/537.36")
@@ -371,6 +374,71 @@ def soundcloud_label(url: str) -> str:
         return ""
 
 
+def entry_label(entry: dict) -> str:
+    return " - ".join(part for part in (entry["artist"], entry["title"]) if part) \
+        or label_from_url(entry["url"])
+
+
+def run_track(cmd: list[str], url: str) -> tuple[int, str]:
+    """Загрузка одного трека с выводом в файл - чтобы параллельные не мешали друг другу."""
+    try:
+        log = tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace")
+    except OSError:
+        try:
+            return subprocess.call([str(c) for c in cmd] + [url],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL), ""
+        except OSError:
+            return 1, ""
+    with log:
+        try:
+            code = subprocess.call([str(c) for c in cmd] + [url], stdout=log, stderr=subprocess.STDOUT)
+        except OSError:
+            return 1, ""
+        log.seek(0)
+        return code, log.read()
+
+
+def last_error(text: str) -> str:
+    for line in reversed(text.splitlines()):
+        if "ERROR" in line:
+            return line.strip()[:300]
+    return ""
+
+
+def download_tracks(cmd: list[str], entries: list[dict]) -> list[str]:
+    """Качает треки в несколько потоков, возвращает список неудачных."""
+    total = len(entries)
+    failed = []
+
+    def work(entry: dict) -> tuple[bool, str]:
+        text = ""
+        for attempt in range(3):
+            code, text = run_track(cmd, entry["url"])
+            if code == 0:
+                return True, ""
+            if "429" in text or "Too Many Requests" in text:
+                time.sleep(10 * (attempt + 1))  # притормозить, если SoundCloud ругается
+            elif attempt < 2:
+                time.sleep(3)
+        return False, last_error(text)
+
+    with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
+        futures = {pool.submit(work, entry): entry for entry in entries}
+        for done, future in enumerate(as_completed(futures), 1):
+            entry = futures[future]
+            label = entry_label(entry)
+            try:
+                ok, err = future.result()
+            except Exception:
+                ok, err = False, ""
+            print("[%d/%d] %s %s" % (done, total, "OK  " if ok else "FAIL", label))
+            if not ok:
+                if err:
+                    print("   " + err)
+                failed.append(soundcloud_label(entry["url"]) or label)
+    return failed
+
+
 def download_soundcloud(py: Path, url: str, folder: Path, fmt: str, playlist: bool,
                         cookies: str | None, ffmpeg: str) -> tuple[int, list[str]]:
     cmd = [
@@ -382,6 +450,8 @@ def download_soundcloud(py: Path, url: str, folder: Path, fmt: str, playlist: bo
         "-P", str(folder),
         "--ffmpeg-location", ffmpeg,
         "--no-playlist",
+        "--concurrent-fragments", "2",
+        "--retries", "3", "--fragment-retries", "3",
     ]
     if cookies:
         cmd += ["--cookies", str(cookies)]
@@ -390,14 +460,15 @@ def download_soundcloud(py: Path, url: str, folder: Path, fmt: str, playlist: bo
     if not entries:  # список не получили - качаем как раньше, без разбора по трекам
         return run(cmd + [url]), []
 
-    failed = []
-    total = len(entries)
-    for index, entry in enumerate(entries, 1):
-        label = " - ".join(part for part in (entry["artist"], entry["title"]) if part) \
-            or label_from_url(entry["url"])
-        print("[%d/%d] %s" % (index, total, label))
+    if len(entries) == 1:
+        entry = entries[0]
+        label = entry_label(entry)
+        print("[1/1] %s" % label)
         if run(cmd + [entry["url"]], echo=False) != 0:
-            failed.append(soundcloud_label(entry["url"]) or label)
+            return 1, [soundcloud_label(entry["url"]) or label]
+        return 0, []
+
+    failed = download_tracks(cmd, entries)
     return (0 if not failed else 1), failed
 
 
