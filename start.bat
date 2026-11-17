@@ -92,6 +92,10 @@ if not defined PY (
     exit /b 1
 )
 
-%PY% -u "%~dp0music_dl.py" %*
+if "%~1"=="" (
+    %PY% -u "%~dp0music_dl.py" --gui
+) else (
+    %PY% -u "%~dp0music_dl.py" %*
+)
 echo.
 pause
