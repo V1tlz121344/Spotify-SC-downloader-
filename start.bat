@@ -10,9 +10,12 @@ if not exist "%~dp0music_dl.py" (
 )
 
 set "PY="
+set "PYVER=3.12.10"
+set "PYURL=https://www.python.org/ftp/python/%PYVER%/python-%PYVER%-amd64.exe"
+set "PYINST=%TEMP%\python-%PYVER%-amd64.exe"
 
-rem ---- 1. installed Python 3.10-3.13 in standard locations ----
-for %%V in (313 312 311 310) do (
+rem ---- 1. installed Python 3.10-3.14 in standard locations ----
+for %%V in (314 313 312 311 310) do (
     if not defined PY (
         for %%P in (
             "%LOCALAPPDATA%\Programs\Python\Python%%V\python.exe"
@@ -20,7 +23,7 @@ for %%V in (313 312 311 310) do (
             "C:\Python%%V\python.exe"
         ) do (
             if not defined PY if exist "%%~P" (
-                "%%~P" -c "import sys;raise SystemExit(0 if (3,9)<=sys.version_info[:2]<=(3,13) else 1)" >nul 2>&1
+                "%%~P" -c "import sys;raise SystemExit(0 if (3,9)<=sys.version_info[:2]<=(3,14) else 1)" >nul 2>&1
                 if not errorlevel 1 set PY="%%~P"
             )
         )
@@ -31,9 +34,9 @@ rem ---- 2. py launcher ----
 if not defined PY (
     where py >nul 2>nul
     if not errorlevel 1 (
-        for %%V in (3.12 3.13 3) do (
+        for %%V in (3.12 3.13 3.14 3) do (
             if not defined PY (
-                py -%%V -c "import sys;raise SystemExit(0 if (3,9)<=sys.version_info[:2]<=(3,13) else 1)" >nul 2>&1
+                py -%%V -c "import sys;raise SystemExit(0 if (3,9)<=sys.version_info[:2]<=(3,14) else 1)" >nul 2>&1
                 if not errorlevel 1 set "PY=py -%%V"
             )
         )
@@ -46,28 +49,30 @@ if not defined PY (
         if not defined PY (
             echo "%%P" | findstr /i "WindowsApps" >nul
             if errorlevel 1 (
-                "%%P" -c "import sys;raise SystemExit(0 if (3,9)<=sys.version_info[:2]<=(3,13) else 1)" >nul 2>&1
+                "%%P" -c "import sys;raise SystemExit(0 if (3,9)<=sys.version_info[:2]<=(3,14) else 1)" >nul 2>&1
                 if not errorlevel 1 set PY="%%P"
             )
         )
     )
 )
 
-rem ---- 4. install Python 3.12 once, if nothing usable was found ----
+rem ---- 4. install Python 3.12 from python.org, if nothing usable was found ----
 if not defined PY (
-    echo Python 3.9-3.13 not found. Installing Python 3.12 via winget, one time only...
-    where winget >nul 2>nul
-    if errorlevel 1 (
-        echo winget not available. Install Python manually: https://www.python.org/downloads/
-        pause
-        exit /b 1
+    echo Python 3.9-3.14 not found. Downloading Python %PYVER% from python.org...
+    if exist "%PYINST%" del /q "%PYINST%" >nul 2>&1
+    where curl.exe >nul 2>nul
+    if not errorlevel 1 (
+        curl.exe -L --fail --silent --show-error -o "%PYINST%" "%PYURL%"
+    ) else (
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%PYURL%' -OutFile '%PYINST%' -UseBasicParsing"
     )
-    winget install -e --id Python.Python.3.12 --scope user --silent --accept-package-agreements --accept-source-agreements
-    if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
-        set PY="%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
-    )
-    if not defined PY if exist "C:\Program Files\Python312\python.exe" (
-        set PY="C:\Program Files\Python312\python.exe"
+    if exist "%PYINST%" (
+        echo Installing Python %PYVER%, 1-2 minutes...
+        "%PYINST%" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_launcher=1
+        del /q "%PYINST%" >nul 2>&1
+        if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
+            set PY="%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+        )
     )
     if not defined PY (
         where py >nul 2>nul
@@ -80,8 +85,9 @@ if not defined PY (
 
 if not defined PY (
     echo.
-    echo Could not find or install Python 3.9-3.13.
-    echo Install it manually: winget install -e --id Python.Python.3.12
+    echo Could not install Python 3.9-3.14 automatically.
+    echo Install Python 3.12 manually: https://www.python.org/downloads/
+    echo Then run start.bat again.
     pause
     exit /b 1
 )

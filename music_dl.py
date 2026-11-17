@@ -121,7 +121,7 @@ def ensure_venv() -> Path:
     if code != 0 or not py.exists():
         sys.exit(
             "Не удалось создать окружение.\n"
-            "Поставьте Python 3.12:  winget install -e --id Python.Python.3.12"
+            "Поставьте Python 3.12:  https://www.python.org/downloads/"
         )
     return py
 
@@ -136,7 +136,7 @@ def ensure_deps(py: Path, update: bool = False) -> None:
     if code != 0:
         code = pip_install(py_s, *extra, "yt-dlp")
     if code != 0 or not has_dist(py_s, "yt-dlp"):
-        sys.exit("yt-dlp не установился. Проверьте интернет и версию Python (нужен 3.9-3.13).")
+        sys.exit("yt-dlp не установился. Проверьте интернет и версию Python (нужен 3.9-3.14).")
 
 
 def install_local_ffmpeg(py: Path) -> Path | None:
